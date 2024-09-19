@@ -11,12 +11,6 @@ st.set_page_config(page_title='การพยากรณ์ด้วย Linear
 # ชื่อของแอป
 st.title("การจัดการค่าระดับน้ำและการพยากรณ์ด้วย Linear Regression")
 
-# ฟังก์ชันสำหรับการแสดงกราฟข้อมูลหลังลบค่า
-def plot_filtered_data(data):
-    fig = px.line(data, x=data.index, y='wl_up', title='Water Level Over Time (Filtered Data)', labels={'x': 'Date', 'wl_up': 'Water Level (wl_up)'})
-    fig.update_layout(xaxis_title="Date", yaxis_title="Water Level (wl_up)")
-    return fig
-
 # ฟังก์ชันสำหรับการแสดงกราฟข้อมูลช่วงที่เลือกและกราฟพยากรณ์
 def plot_selected_and_forecasted(data, forecasted, start_date, end_date):
     selected_data = data[(data.index.date >= start_date) & (data.index.date <= end_date)]
@@ -41,8 +35,9 @@ def forecast_with_regression(data, forecast_start_date):
 
     # ใช้ข้อมูลย้อนหลัง 14 วันล่าสุดในการพยากรณ์
     for idx in forecasted_data.index:
-        X_train = data.loc[idx - pd.Timedelta(days=14): idx - pd.Timedelta(minutes=15)].dropna().iloc[-336:][[f'lag_{i}' for i in range(1, 337)]]
-        y_train = data.loc[idx - pd.Timedelta(days=14): idx - pd.Timedelta(minutes=15)].dropna().iloc[-336:]['wl_up']
+        # ใช้ข้อมูลล่าสุดของช่วงข้อมูลจริงเป็นข้อมูลในการพยากรณ์
+        X_train = data.dropna().iloc[-336:][[f'lag_{i}' for i in range(1, 337)]]
+        y_train = data.dropna().iloc[-336:]['wl_up']
 
         if len(X_train) == 336:
             model = LinearRegression()
@@ -72,14 +67,6 @@ if uploaded_file is not None:
     # ตัดข้อมูลที่มีค่า wl_up น้อยกว่า 100 ออก
     filtered_data = data[data['wl_up'] >= 100]
 
-    # แสดงตัวอย่างข้อมูลหลังจากลบค่าที่น้อยกว่า 100 ออก
-    st.subheader('แสดงตัวอย่างข้อมูลหลังจากลบค่าที่น้อยกว่า 100 ออก')
-    st.write(filtered_data.head())
-
-    # แสดงกราฟข้อมูลหลังจากลบค่าที่น้อยกว่า 100 ออก
-    st.subheader('กราฟข้อมูลหลังจากลบค่าที่น้อยกว่า 100 ออก')
-    st.plotly_chart(plot_filtered_data(filtered_data))
-
     # ให้ผู้ใช้เลือกช่วงวันที่ที่สนใจและพยากรณ์ต่อจากข้อมูลที่เลือก
     st.subheader("เลือกช่วงวันที่ที่สนใจและแสดงการพยากรณ์ต่อ")
     start_date = st.date_input("เลือกวันเริ่มต้น (ดูข้อมูล)", pd.to_datetime(filtered_data.index.min()).date())
@@ -92,4 +79,5 @@ if uploaded_file is not None:
 
         # แสดงกราฟข้อมูลช่วงเวลาที่เลือกและกราฟการพยากรณ์
         st.plotly_chart(plot_selected_and_forecasted(filtered_data, forecasted_data, start_date, end_date))
+
 
