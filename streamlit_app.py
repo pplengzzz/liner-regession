@@ -11,6 +11,12 @@ st.set_page_config(page_title='การพยากรณ์ด้วย Linear
 # ชื่อของแอป
 st.title("การจัดการค่าระดับน้ำและการพยากรณ์ด้วย Linear Regression")
 
+# ฟังก์ชันสำหรับการแสดงกราฟข้อมูลหลังลบค่า
+def plot_filtered_data(data):
+    fig = px.line(data, x=data.index, y='wl_up', title='Water Level Over Time (Filtered Data)', labels={'x': 'Date', 'wl_up': 'Water Level (wl_up)'})
+    fig.update_layout(xaxis_title="Date", yaxis_title="Water Level (wl_up)")
+    return fig
+
 # ฟังก์ชันสำหรับการแสดงกราฟข้อมูลช่วงที่เลือกและกราฟพยากรณ์
 def plot_selected_and_forecasted(data, forecasted, start_date, end_date):
     selected_data = data[(data.index.date >= start_date) & (data.index.date <= end_date)]
@@ -69,6 +75,10 @@ if uploaded_file is not None:
     # แสดงตัวอย่างข้อมูลหลังจากลบค่าที่น้อยกว่า 100 ออก
     st.subheader('แสดงตัวอย่างข้อมูลหลังจากลบค่าที่น้อยกว่า 100 ออก')
     st.write(filtered_data.head())
+
+    # แสดงกราฟข้อมูลหลังจากลบค่าที่น้อยกว่า 100 ออก
+    st.subheader('กราฟข้อมูลหลังจากลบค่าที่น้อยกว่า 100 ออก')
+    st.plotly_chart(plot_filtered_data(filtered_data))
 
     # ให้ผู้ใช้เลือกช่วงวันที่ที่สนใจและพยากรณ์ต่อจากข้อมูลที่เลือก
     st.subheader("เลือกช่วงวันที่ที่สนใจและแสดงการพยากรณ์ต่อ")
