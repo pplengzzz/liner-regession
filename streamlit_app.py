@@ -41,7 +41,7 @@ def forecast_with_regression(data, forecast_start_date):
         if len(X_train) == 336:
             model = LinearRegression()
             model.fit(X_train, y_train)
-            X_pred = X_train.values.reshape(1, -1)
+            X_pred = X_train.iloc[-1].values.reshape(1, -1)  # ใช้ข้อมูลล่าสุดที่ถูกต้อง
             forecasted_value = model.predict(X_pred)[0]
             forecasted_data.loc[idx, 'wl_up'] = forecasted_value
 
@@ -66,7 +66,11 @@ if uploaded_file is not None:
     # ตัดข้อมูลที่มีค่า wl_up น้อยกว่า 100 ออก
     filtered_data = data[data['wl_up'] >= 100]
 
-    # ให้ผู้ใช้เลือกช่วงวันที่ที่สนใจก่อนการพยากรณ์
+    # แสดงตัวอย่างข้อมูลหลังจากลบค่าที่น้อยกว่า 100 ออก
+    st.subheader('แสดงตัวอย่างข้อมูลหลังจากลบค่าที่น้อยกว่า 100 ออก')
+    st.write(filtered_data.head())
+
+    # ให้ผู้ใช้เลือกช่วงวันที่ที่สนใจและพยากรณ์ต่อจากข้อมูลที่เลือก
     st.subheader("เลือกช่วงวันที่ที่สนใจและแสดงการพยากรณ์ต่อ")
     start_date = st.date_input("เลือกวันเริ่มต้น (ดูข้อมูล)", pd.to_datetime(filtered_data.index.min()).date())
     end_date = st.date_input("เลือกวันสิ้นสุด (ดูข้อมูล)", pd.to_datetime(filtered_data.index.max()).date())
