@@ -11,90 +11,41 @@ st.set_page_config(page_title='การพยากรณ์ด้วย Linear
 # ชื่อของแอป
 st.title("การจัดการค่าระดับน้ำและการพยากรณ์ด้วย Linear Regression")
 
-# ฟังก์ชันสำหรับการแสดงกราฟข้อมูลทั้งไฟล์ (ตัวอย่าง)
-def plot_full_data(data):
-    fig = px.line(data, x=data.index, y='wl_up', title='Water Level Over Time (Full Data)', labels={'x': 'Date', 'wl_up': 'Water Level (wl_up)'})
-    fig.update_layout(xaxis_title="Date", yaxis_title="Water Level (wl_up)")
-    return fig
-
-# ฟังก์ชันสำหรับการแสดงกราฟข้อมูลช่วงที่เลือกก่อนการตัด
-def plot_selected_time_range(data, start_date, end_date):
+# ฟังก์ชันสำหรับการแสดงกราฟข้อมูลช่วงที่เลือกและกราฟพยากรณ์
+def plot_selected_and_forecasted(data, forecasted, start_date, end_date):
     selected_data = data[(data.index.date >= start_date) & (data.index.date <= end_date)]
-    fig = px.line(selected_data, x=selected_data.index, y='wl_up', title=f'Water Level from {start_date} to {end_date}', labels={'x': 'Date', 'wl_up': 'Water Level (wl_up)'})
-    fig.update_layout(xaxis_title="Date", yaxis_title="Water Level (wl_up)")
-    return fig
-
-# ฟังก์ชันสำหรับการแสดงกราฟข้อมูลหลังตัดค่า (ใช้ plotly)
-def plot_original_data(data, original_nan_indexes=None):
-    data = data.sort_index()
-    fig = px.line(data, x=data.index, y='wl_up', title='Water Level Over Time (After Cutting)', labels={'x': 'Date', 'wl_up': 'Water Level (wl_up)'})
-    if original_nan_indexes is not None:
-        fig.add_scatter(x=original_nan_indexes, y=data.loc[original_nan_indexes, 'wl_up'], mode='markers', name='Missing Values (Cut)', marker=dict(color='orange'))
-    fig.update_layout(xaxis_title="Date", yaxis_title="Water Level (wl_up)")
-    return fig
-
-# ฟังก์ชันสำหรับการแสดงกราฟที่ถูกเติมค่าแล้ว (ใช้ plotly)
-def plot_filled_data(original_data, filled_data, original_nan_indexes):
-    original_data = original_data.sort_index()
-    filled_data = filled_data.sort_index()
     
-    # กราฟของค่าจริง
-    fig = px.line(original_data, x=original_data.index, y='wl_up', title='Water Level Over Time (After Filling)', labels={'x': 'Date', 'wl_up': 'Water Level (wl_up)'})
-
-    # Plot ค่าที่ถูกตัดออก (สีส้ม)
-    if original_nan_indexes is not None:
-        fig.add_scatter(x=original_nan_indexes, y=original_data.loc[original_nan_indexes, 'wl_up'], mode='markers', name='Cut Values', marker=dict(color='orange'))
-
-    # Plot ค่าที่เติมด้วยโมเดล (สีเขียว)
-    if original_nan_indexes is not None:
-        fig.add_scatter(x=filled_data.loc[original_nan_indexes].index, y=filled_data.loc[original_nan_indexes, 'wl_up'], mode='lines', name='Filled Values (Model)', line=dict(color='green'))
+    # สร้างกราฟข้อมูลช่วงเวลาที่เลือก
+    fig = px.line(selected_data, x=selected_data.index, y='wl_up', title=f'Water Level from {start_date} to {end_date} (with Forecast)', labels={'x': 'Date', 'wl_up': 'Water Level (wl_up)'})
+    
+    # เพิ่มกราฟการพยากรณ์ (เส้นสีเขียว)
+    fig.add_scatter(x=forecasted.index, y=forecasted['wl_up'], mode='lines', name='Forecasted Values', line=dict(color='green'))
 
     fig.update_layout(xaxis_title="Date", yaxis_title="Water Level (wl_up)")
     return fig
 
-# ฟังก์ชันสำหรับการเติมค่าด้วย LinearRegression
-def fill_missing_values_with_regression(full_data):
-    filled_data = full_data.copy()
+# ฟังก์ชันสำหรับการพยากรณ์ด้วย LinearRegression
+def forecast_with_regression(data, forecast_start_date):
+    forecasted_data = pd.DataFrame(index=pd.date_range(start=forecast_start_date, periods=2*96, freq='15T'))  # พยากรณ์ 2 วันถัดไป
+    forecasted_data['wl_up'] = np.nan
     
     # สร้าง lag features ย้อนหลัง 14 วัน (336 rows = 14 วัน)
     for i in range(1, 337):
-        filled_data[f'lag_{i}'] = filled_data['wl_up'].shift(i)
+        data[f'lag_{i}'] = data['wl_up'].shift(i)
 
-    # เติมค่าที่หายไปในช่วงที่ขาดหาย
-    missing_periods = filled_data[filled_data['wl_up'].isna()].index
+    # ใช้ข้อมูลย้อนหลัง 14 วันล่าสุดในการพยากรณ์
+    for idx in forecasted_data.index:
+        X_train = data.loc[idx - pd.Timedelta(days=14): idx - pd.Timedelta(minutes=15)].dropna().iloc[-336:][[f'lag_{i}' for i in range(1, 337)]]
+        y_train = data.loc[idx - pd.Timedelta(days=14): idx - pd.Timedelta(minutes=15)].dropna().iloc[-336:]['wl_up']
 
-    for idx in missing_periods:
-        # ใช้ข้อมูลย้อนหลัง 14 วัน
-        if len(filled_data.loc[idx - pd.Timedelta(days=14): idx].dropna()) >= 336:
-            X_train = filled_data.loc[idx - pd.Timedelta(days=14): idx - pd.Timedelta(minutes=15)].dropna().iloc[-336:][[f'lag_{i}' for i in range(1, 337)]]
-            y_train = filled_data.loc[idx - pd.Timedelta(days=14): idx - pd.Timedelta(minutes=15)].dropna().iloc[-336:]['wl_up']
-
+        if len(X_train) == 336:
             model = LinearRegression()
             model.fit(X_train, y_train)
+            X_pred = X_train.values.reshape(1, -1)
+            forecasted_value = model.predict(X_pred)[0]
+            forecasted_data.loc[idx, 'wl_up'] = forecasted_value
 
-            # ทำนาย 2 วันข้างหน้า (2*96 = 192 rows)
-            X_pred = filled_data.loc[idx - pd.Timedelta(days=14): idx - pd.Timedelta(minutes=15)].dropna().iloc[-336:].values.reshape(1, -1)
-            filled_value = model.predict(X_pred)[0]
-            filled_data.loc[idx, 'wl_up'] = filled_value
-
-    return filled_data
-
-# ฟังก์ชันคำนวณความแม่นยำ
-def calculate_accuracy(filled_data, original_data, original_nan_indexes):
-    actual_values = original_data.loc[original_nan_indexes, 'wl_up']
-    predicted_values = filled_data.loc[original_nan_indexes, 'wl_up']
-    mae = mean_absolute_error(actual_values, predicted_values)
-    rmse = np.sqrt(mean_squared_error(actual_values, predicted_values))
-    st.write(f"Mean Absolute Error (MAE): {mae:.4f}")
-    st.write(f"Root Mean Square Error (RMSE): {rmse:.4f}")
-
-# ใช้ session state เพื่อเก็บค่าการเลือกวันที่
-if 'start_date' not in st.session_state:
-    st.session_state['start_date'] = None
-if 'end_date' not in st.session_state:
-    st.session_state['end_date'] = None
-if 'selected_graph' not in st.session_state:
-    st.session_state['selected_graph'] = None
+    return forecasted_data
 
 # อัปโหลดไฟล์ CSV ข้อมูลจริง
 uploaded_file = st.file_uploader("เลือกไฟล์ CSV ข้อมูลจริง", type="csv")
@@ -115,58 +66,16 @@ if uploaded_file is not None:
     # ตัดข้อมูลที่มีค่า wl_up น้อยกว่า 100 ออก
     filtered_data = data[data['wl_up'] >= 100]
 
-    # แสดงกราฟข้อมูลทั้งไฟล์ก่อน
-    st.subheader('กราฟตัวอย่างข้อมูลทั้งไฟล์หลังจากตัดค่าที่น้อยกว่า 100 ออก')
-    st.plotly_chart(plot_full_data(filtered_data))
-
-    st.subheader("เลือกช่วงวันที่ที่สนใจก่อนการตัดข้อมูล")
+    # ให้ผู้ใช้เลือกช่วงวันที่ที่สนใจก่อนการพยากรณ์
+    st.subheader("เลือกช่วงวันที่ที่สนใจและแสดงการพยากรณ์ต่อ")
     start_date = st.date_input("เลือกวันเริ่มต้น (ดูข้อมูล)", pd.to_datetime(filtered_data.index.min()).date())
     end_date = st.date_input("เลือกวันสิ้นสุด (ดูข้อมูล)", pd.to_datetime(filtered_data.index.max()).date())
 
-    if st.button("ตกลง (แสดงข้อมูลช่วงที่สนใจ)"):
-        st.session_state['start_date'] = start_date
-        st.session_state['end_date'] = end_date
-        st.session_state['selected_graph'] = plot_selected_time_range(filtered_data, start_date, end_date)
-        st.plotly_chart(st.session_state['selected_graph'])
+    if st.button("ตกลง (พยากรณ์ต่อจากช่วงที่เลือก)"):
+        # พยากรณ์ 2 วันถัดไปจากช่วงวันที่เลือก
+        forecast_start_date = end_date + pd.Timedelta(days=1)
+        forecasted_data = forecast_with_regression(filtered_data, forecast_start_date)
 
-    if st.session_state['start_date'] is not None and st.session_state['end_date'] is not None:
-        st.subheader("เลือกช่วงวันที่และเวลาที่ต้องการตัดข้อมูล")
-        start_date_cut = st.date_input("เลือกวันเริ่มต้น (ตัดข้อมูล)", pd.to_datetime(filtered_data.index.min()).date(), key="start_date_cut")
-        start_time_cut = st.time_input("เลือกเวลาเริ่มต้น (ตัดข้อมูล)", value=pd.to_datetime(filtered_data.index.min()).time(), key="start_time_cut")
-        end_date_cut = st.date_input("เลือกวันสิ้นสุด (ตัดข้อมูล)", pd.to_datetime(filtered_data.index.max()).date(), key="end_date_cut")
-        end_time_cut = st.time_input("เลือกเวลาสิ้นสุด (ตัดข้อมูล)", value=pd.to_datetime(filtered_data.index.max()).time(), key="end_time_cut")
+        # แสดงกราฟข้อมูลช่วงเวลาที่เลือกและกราฟการพยากรณ์
+        st.plotly_chart(plot_selected_and_forecasted(filtered_data, forecasted_data, start_date, end_date))
 
-        start_datetime_cut = pd.to_datetime(f"{start_date_cut} {start_time_cut}")
-        end_datetime_cut = pd.to_datetime(f"{end_date_cut} {end_time_cut}")
-
-        if st.button("ตัดข้อมูล"):
-            original_data = filtered_data.copy()
-            date_mask = (filtered_data.index >= start_datetime_cut) & (filtered_data.index <= end_datetime_cut)
-            if date_mask.any():
-                filtered_data.loc[date_mask, 'wl_up'] = np.nan
-                original_nan_indexes = filtered_data[filtered_data['wl_up'].isna()].index
-
-                # แสดงกราฟช่วงที่สนใจก่อน (คงไว้แค่กราฟเดียว)
-                st.plotly_chart(st.session_state['selected_graph'])
-
-                # แสดงกราฟข้อมูลที่ถูกตัด
-                st.subheader('กราฟข้อมูลหลังจากตัดค่าออก')
-                cut_graph = plot_original_data(filtered_data, original_nan_indexes)
-                st.plotly_chart(cut_graph)
-
-                # เติมค่าด้วย Linear Regression
-                filled_data = fill_missing_values_with_regression(filtered_data)
-
-                # คำนวณความแม่นยำ
-                st.subheader('ผลการคำนวณความแม่นยำ')
-                calculate_accuracy(filled_data, original_data, original_nan_indexes)
-
-                # แสดงกราฟข้อมูลที่เติมค่าแล้ว
-                st.subheader('กราฟผลลัพธ์การเติมค่า')
-                st.plotly_chart(plot_filled_data(original_data, filled_data, original_nan_indexes))
-
-                # แสดงผลลัพธ์เป็นตาราง
-                st.subheader('ตารางข้อมูลที่เติมค่า (datetime, wl_up)')
-                st.write(filled_data[['wl_up']])
-            else:
-                st.error("ไม่พบข้อมูลในช่วงวันที่ที่เลือก กรุณาเลือกวันที่ใหม่")
