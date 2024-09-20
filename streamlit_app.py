@@ -24,26 +24,34 @@ def forecast_with_linear_regression(data, forecast_start_date):
     # เติมค่า missing values ด้วยการ interpolate
     data['wl_up'].interpolate(method='time', inplace=True)
 
-    # ใช้ข้อมูลจนถึงเวลาที่พยากรณ์เท่านั้น
-    data = data.loc[:forecast_start_date - pd.Timedelta(minutes=15)].copy()
+    # ใช้ข้อมูลย้อนหลัง 3 วันในการเทรนโมเดล
+    training_data_end = forecast_start_date - pd.Timedelta(minutes=15)
+    training_data_start = training_data_end - pd.Timedelta(days=3) + pd.Timedelta(minutes=15)
+
+    # ตรวจสอบว่ามีข้อมูลเพียงพอหรือไม่
+    if training_data_start < data.index.min():
+        st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลสำหรับการเทรนไม่เพียงพอ")
+        return pd.DataFrame()
+
+    training_data = data.loc[training_data_start:training_data_end].copy()
 
     # สร้างฟีเจอร์ lag
-    lags = [1, 4, 96]  # ใช้ lag 15 นาที, 1 ชั่วโมง, 1 วัน
+    lags = [1, 4, 96, 192]  # ใช้ lag 15 นาที, 1 ชั่วโมง, 1 วัน, 2 วัน
     for lag in lags:
-        data[f'lag_{lag}'] = data['wl_up'].shift(lag)
+        training_data[f'lag_{lag}'] = training_data['wl_up'].shift(lag)
 
     # ลบแถวที่มีค่า NaN ในฟีเจอร์ lag
-    data.dropna(inplace=True)
+    training_data.dropna(inplace=True)
 
     # ตรวจสอบว่ามีข้อมูลเพียงพอหรือไม่หลังจากสร้างฟีเจอร์ lag
-    if data.empty:
+    if training_data.empty:
         st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลสำหรับการเทรนไม่เพียงพอหลังจากสร้างฟีเจอร์ lag")
         return pd.DataFrame()
 
     # ฟีเจอร์และตัวแปรเป้าหมาย
     feature_cols = [f'lag_{lag}' for lag in lags]
-    X_train = data[feature_cols]
-    y_train = data['wl_up']
+    X_train = training_data[feature_cols]
+    y_train = training_data['wl_up']
 
     # เทรนโมเดล Linear Regression
     model = LinearRegression()
@@ -119,7 +127,7 @@ if uploaded_file is not None:
             forecast_start_date = selected_data.index.max() + pd.Timedelta(minutes=15)
 
             # พยากรณ์
-            forecasted_data = forecast_with_linear_regression(selected_data, forecast_start_date)
+            forecasted_data = forecast_with_linear_regression(data, forecast_start_date)
 
             # ตรวจสอบว่ามีการพยากรณ์หรือไม่
             if not forecasted_data.empty:
