@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 # ตั้งค่าหน้าเว็บ Streamlit
 st.set_page_config(page_title='การพยากรณ์ด้วย Linear Regression', page_icon=':ocean:')
@@ -30,26 +29,68 @@ def plot_selected_and_forecasted(data, forecasted, start_date, end_date):
     fig.update_layout(xaxis_title="Date", yaxis_title="Water Level (wl_up)")
     return fig
 
-# ฟังก์ชันสำหรับการพยากรณ์ด้วย LinearRegression
+# ฟังก์ชันสำหรับการพยากรณ์ด้วย LinearRegression ที่ปรับปรุงแล้ว
 def forecast_with_regression(data, forecast_start_date):
-    forecasted_data = pd.DataFrame(index=pd.date_range(start=forecast_start_date, periods=2*96, freq='15T'))  # พยากรณ์ 2 วันถัดไป
+    # สร้าง DataFrame สำหรับการพยากรณ์ 1 วันถัดไป (96 ช่วงเวลา ทุกๆ 15 นาที)
+    forecasted_data = pd.DataFrame(index=pd.date_range(start=forecast_start_date, periods=96, freq='15T'))
     forecasted_data['wl_up'] = np.nan
-    
-    # สร้าง lag features ย้อนหลัง 14 วัน (336 rows = 14 วัน)
-    for i in range(1, 337):
-        data[f'lag_{i}'] = data['wl_up'].shift(i)
 
-    # ใช้ข้อมูลย้อนหลัง 14 วันล่าสุดในการพยากรณ์
-    for idx in forecasted_data.index:
-        X_train = data.dropna().iloc[-336:][[f'lag_{i}' for i in range(1, 337)]]
-        y_train = data.dropna().iloc[-336:]['wl_up']
+    # ใช้ข้อมูลย้อนหลัง 7 วันในการเทรนโมเดล
+    training_data_end = forecast_start_date - pd.Timedelta(minutes=15)
+    training_data_start = training_data_end - pd.Timedelta(days=7) + pd.Timedelta(minutes=15)
+    training_data = data.loc[training_data_start:training_data_end].copy()
 
-        if len(X_train) == 336:
-            model = LinearRegression()
-            model.fit(X_train, y_train)
-            X_pred = X_train.iloc[-1].values.reshape(1, -1)  # ใช้ข้อมูลล่าสุดที่ถูกต้อง
-            forecasted_value = model.predict(X_pred)[0]
-            forecasted_data.loc[idx, 'wl_up'] = forecasted_value
+    # สร้างฟีเจอร์ lag หลายระดับ
+    lags = [1, 4, 96, 192, 288, 384, 480, 576, 672]  # lag 15 นาที, 1 ชั่วโมง, และทุกๆ 1 วัน จนถึง 7 วัน
+    for lag in lags:
+        training_data[f'lag_{lag}'] = training_data['wl_up'].shift(lag)
+    training_data.dropna(inplace=True)
+
+    # รวมฟีเจอร์เวลา
+    training_data['hour'] = training_data.index.hour
+    training_data['minute'] = training_data.index.minute
+    training_data['day_of_week'] = training_data.index.dayofweek
+
+    # ฟีเจอร์และตัวแปรเป้าหมาย
+    feature_cols = [f'lag_{lag}' for lag in lags] + ['hour', 'minute', 'day_of_week']
+    X_train = training_data[feature_cols]
+    y_train = training_data['wl_up']
+
+    # เทรนโมเดล
+    model = LinearRegression()
+    model.fit(X_train, y_train)
+
+    # การพยากรณ์
+    for i in range(len(forecasted_data)):
+        forecast_time = forecasted_data.index[i]
+
+        # สร้างฟีเจอร์ lag
+        lag_features = {}
+        for lag in lags:
+            lag_time = forecast_time - pd.Timedelta(minutes=15*lag)
+            if lag_time in data.index:
+                lag_value = data.at[lag_time, 'wl_up']
+            elif lag_time in forecasted_data.index:
+                lag_index = forecasted_data.index.get_loc(lag_time)
+                lag_value = forecasted_data.iloc[lag_index]['wl_up']
+            else:
+                lag_value = np.nan
+            lag_features[f'lag_{lag}'] = lag_value
+
+        # ถ้ามีค่า lag ที่หายไป ให้ข้ามการพยากรณ์
+        if np.any([np.isnan(v) for v in lag_features.values()]):
+            continue
+
+        # ฟีเจอร์เวลา
+        lag_features['hour'] = forecast_time.hour
+        lag_features['minute'] = forecast_time.minute
+        lag_features['day_of_week'] = forecast_time.dayofweek
+
+        X_pred = pd.DataFrame([lag_features])
+
+        # พยากรณ์ค่า
+        forecasted_value = model.predict(X_pred)[0]
+        forecasted_data.iloc[i, forecasted_data.columns.get_loc('wl_up')] = forecasted_value
 
     return forecasted_data
 
@@ -61,14 +102,7 @@ if uploaded_file is not None:
     data['datetime'] = pd.to_datetime(data['datetime'])
     data['datetime'] = data['datetime'].dt.tz_localize(None)
     data.set_index('datetime', inplace=True)
-    data['hour'] = data.index.hour
-    data['day_of_week'] = data.index.dayofweek
-    data['minute'] = data.index.minute
-    data['lag_1'] = data['wl_up'].shift(1)
-    data['lag_2'] = data['wl_up'].shift(2)
-    data['lag_1'].ffill(inplace=True)
-    data['lag_2'].ffill(inplace=True)
-
+    
     # ตัดข้อมูลที่มีค่า wl_up น้อยกว่า 100 ออก
     filtered_data = data[data['wl_up'] >= 100]
 
@@ -82,8 +116,10 @@ if uploaded_file is not None:
     end_date = st.date_input("เลือกวันสิ้นสุด (ดูข้อมูล)", pd.to_datetime(filtered_data.index.max()).date())
 
     if st.button("ตกลง (พยากรณ์ต่อจากช่วงที่เลือก)"):
-        # พยากรณ์ 2 วันถัดไปจากช่วงวันที่เลือก
-        forecast_start_date = end_date + pd.Timedelta(days=1)
+        # กำหนดวันที่เริ่มพยากรณ์เป็นเวลาถัดไปจากข้อมูลล่าสุด
+        forecast_start_date = filtered_data.index.max() + pd.Timedelta(minutes=15)
+
+        # พยากรณ์ 1 วันถัดไปจากช่วงวันที่เลือก
         forecasted_data = forecast_with_regression(filtered_data, forecast_start_date)
 
         # แสดงกราฟข้อมูลช่วงเวลาที่เลือกและกราฟการพยากรณ์
