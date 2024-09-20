@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 from sklearn.linear_model import LinearRegression
-from sklearn.preprocessing import PolynomialFeatures
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 # ตั้งค่าหน้าเว็บ Streamlit
@@ -50,36 +49,38 @@ def forecast_with_linear_regression(data, forecast_start_date):
     # เติมค่า missing values ด้วยการ interpolate
     training_data['wl_up'].interpolate(method='time', inplace=True)
 
-    # สร้างฟีเจอร์ lag หลายระดับ
-    lags = list(range(1, 97))  # ใช้ lag ตั้งแต่ 1 ถึง 96 (ย้อนหลัง 1 วัน)
+    # สร้างฟีเจอร์ lag ที่สำคัญ
+    lags = [96, 672]  # ใช้ lag 1 วันและ 7 วันก่อนหน้า
     for lag in lags:
         training_data[f'lag_{lag}'] = training_data['wl_up'].shift(lag)
+
+    # สร้างฟีเจอร์ค่าเฉลี่ยเคลื่อนที่
+    training_data['ma_4'] = training_data['wl_up'].rolling(window=4).mean()  # ค่าเฉลี่ยใน 1 ชั่วโมงที่ผ่านมา
+    training_data['ma_24'] = training_data['wl_up'].rolling(window=24).mean()  # ค่าเฉลี่ยใน 6 ชั่วโมงที่ผ่านมา
+    training_data['ma_48'] = training_data['wl_up'].rolling(window=48).mean()  # ค่าเฉลี่ยใน 12 ชั่วโมงที่ผ่านมา
 
     # ลบแถวที่มีค่า NaN ในฟีเจอร์
     training_data.dropna(inplace=True)
 
-    # รวมฟีเจอร์เวลา
-    training_data['hour'] = training_data.index.hour
-    training_data['minute'] = training_data.index.minute
-    training_data['dayofweek'] = training_data.index.dayofweek
+    # แปลงฟีเจอร์เวลาเป็นรูปแบบวงกลม
+    training_data['hour_sin'] = np.sin(2 * np.pi * training_data.index.hour / 24)
+    training_data['hour_cos'] = np.cos(2 * np.pi * training_data.index.hour / 24)
+    training_data['dayofweek_sin'] = np.sin(2 * np.pi * training_data.index.dayofweek / 7)
+    training_data['dayofweek_cos'] = np.cos(2 * np.pi * training_data.index.dayofweek / 7)
 
     # ฟีเจอร์และตัวแปรเป้าหมาย
-    feature_cols = [f'lag_{lag}' for lag in lags] + ['hour', 'minute', 'dayofweek']
+    feature_cols = [f'lag_{lag}' for lag in lags] + ['ma_4', 'ma_24', 'ma_48', 'hour_sin', 'hour_cos', 'dayofweek_sin', 'dayofweek_cos']
     X_train = training_data[feature_cols]
     y_train = training_data['wl_up']
 
-    # สร้างฟีเจอร์โพลิโนเมียล
-    poly = PolynomialFeatures(degree=2, include_bias=False)
-    X_train_poly = poly.fit_transform(X_train)
-
     # ตรวจสอบว่ามีข้อมูลเพียงพอหรือไม่
-    if X_train_poly.size == 0:
+    if X_train.empty:
         st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลสำหรับการเทรนไม่เพียงพอ")
         return pd.DataFrame()
 
     # เทรนโมเดล Linear Regression
     model = LinearRegression()
-    model.fit(X_train_poly, y_train)
+    model.fit(X_train, y_train)
 
     # การพยากรณ์
     for i in range(len(forecasted_data)):
@@ -101,17 +102,33 @@ def forecast_with_linear_regression(data, forecast_start_date):
         if np.any(pd.isnull(list(lag_features.values()))):
             continue
 
-        # ฟีเจอร์เวลา
-        lag_features['hour'] = forecast_time.hour
-        lag_features['minute'] = forecast_time.minute
-        lag_features['dayofweek'] = forecast_time.dayofweek
+        # สร้างฟีเจอร์ค่าเฉลี่ยเคลื่อนที่
+        ma_4 = forecasted_data['wl_up'].iloc[i-4:i].mean() if i >= 4 else np.nan
+        ma_24 = forecasted_data['wl_up'].iloc[i-24:i].mean() if i >= 24 else np.nan
+        ma_48 = forecasted_data['wl_up'].iloc[i-48:i].mean() if i >= 48 else np.nan
+
+        # ถ้ามีค่า MA ที่หายไป ให้ข้ามการพยากรณ์
+        if np.isnan(ma_4) or np.isnan(ma_24) or np.isnan(ma_48):
+            continue
+
+        lag_features['ma_4'] = ma_4
+        lag_features['ma_24'] = ma_24
+        lag_features['ma_48'] = ma_48
+
+        # แปลงฟีเจอร์เวลาเป็นรูปแบบวงกลม
+        lag_features['hour_sin'] = np.sin(2 * np.pi * forecast_time.hour / 24)
+        lag_features['hour_cos'] = np.cos(2 * np.pi * forecast_time.hour / 24)
+        lag_features['dayofweek_sin'] = np.sin(2 * np.pi * forecast_time.dayofweek / 7)
+        lag_features['dayofweek_cos'] = np.cos(2 * np.pi * forecast_time.dayofweek / 7)
 
         X_pred = pd.DataFrame([lag_features])
-        X_pred_poly = poly.transform(X_pred)
 
         # พยากรณ์ค่า
-        forecasted_value = model.predict(X_pred_poly)[0]
+        forecasted_value = model.predict(X_pred)[0]
         forecasted_data.at[forecast_time, 'wl_up'] = forecasted_value
+
+    # ใช้ moving average เพื่อทำให้ค่าพยากรณ์เรียบขึ้น
+    forecasted_data['wl_up'] = forecasted_data['wl_up'].rolling(window=4, min_periods=1).mean()
 
     return forecasted_data
 
