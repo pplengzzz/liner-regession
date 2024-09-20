@@ -30,7 +30,7 @@ def plot_selected_and_forecasted(data, forecasted, start_date, end_date):
     fig.update_layout(xaxis_title="Date", yaxis_title="Water Level (wl_up)")
     return fig
 
-# ฟังก์ชันสำหรับการพยากรณ์ด้วย Ridge Regression ที่ปรับปรุงแล้ว
+# ฟังก์ชันสำหรับการพยากรณ์ด้วย Ridge Regression ที่แก้ไขแล้ว
 def forecast_with_regression(data, forecast_start_date):
     # สร้าง DataFrame สำหรับการพยากรณ์ 1 วันถัดไป (96 ช่วงเวลา ทุกๆ 15 นาที)
     forecasted_data = pd.DataFrame(index=pd.date_range(start=forecast_start_date, periods=96, freq='15T'))
@@ -64,10 +64,10 @@ def forecast_with_regression(data, forecast_start_date):
     # รวมฟีเจอร์เวลา
     training_data['hour'] = training_data.index.hour
     training_data['minute'] = training_data.index.minute
-    training_data['day_of_week'] = training_data.index.dayofweek
+    training_data['dayofweek'] = training_data.index.dayofweek  # แก้ไขจาก day_of_week เป็น dayofweek
 
     # ฟีเจอร์และตัวแปรเป้าหมาย
-    feature_cols = [f'lag_{lag}' for lag in lags] + ['ma_96', 'trend', 'hour', 'minute', 'day_of_week']
+    feature_cols = [f'lag_{lag}' for lag in lags] + ['ma_96', 'trend', 'hour', 'minute', 'dayofweek']
     X_train = training_data[feature_cols]
     y_train = training_data['wl_up']
 
@@ -103,16 +103,16 @@ def forecast_with_regression(data, forecast_start_date):
         # ฟีเจอร์เพิ่มเติม
         # Moving Average
         ma_time = forecast_time - pd.Timedelta(minutes=15)
-        if ma_time in data.index:
-            ma_96 = data.loc[ma_time - pd.Timedelta(minutes=15*95): ma_time]['wl_up'].mean()
-        elif ma_time in forecasted_data.index:
+        ma_start_time = ma_time - pd.Timedelta(minutes=15*95)
+        if ma_start_time in data.index and ma_time in data.index:
+            ma_96 = data.loc[ma_start_time: ma_time]['wl_up'].mean()
+        else:
+            # ใช้ค่าที่พยากรณ์ไว้ก่อนหน้านี้
             recent_values = forecasted_data['wl_up'].dropna()
             if len(recent_values) >= 96:
                 ma_96 = recent_values.iloc[-96:].mean()
             else:
                 ma_96 = np.nan
-        else:
-            ma_96 = np.nan
         lag_features['ma_96'] = ma_96
 
         # ถ้ามีค่า ma_96 ที่หายไป ให้ข้ามการพยากรณ์
@@ -125,7 +125,7 @@ def forecast_with_regression(data, forecast_start_date):
         # ฟีเจอร์เวลา
         lag_features['hour'] = forecast_time.hour
         lag_features['minute'] = forecast_time.minute
-        lag_features['day_of_week'] = forecast_time.dayof_week
+        lag_features['dayofweek'] = forecast_time.dayofweek  # แก้ไขจาก day_of_week เป็น dayofweek
 
         X_pred = pd.DataFrame([lag_features])
 
