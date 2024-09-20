@@ -17,7 +17,7 @@ def plot_filtered_data(data):
     fig.update_layout(xaxis_title="Date", yaxis_title="Water Level (wl_up)")
     return fig
 
-# ฟังก์ชันสำหรับการแสดงกราฟข้อมูลช่วงที่เลือกและกราฟพยากรณ์
+# ฟังก์ชันสำหรับการแสดงกราฟข้อมูลและการพยากรณ์
 def plot_selected_and_forecasted(data, forecasted):
     # รวมข้อมูลจริงและค่าพยากรณ์
     combined_data = pd.concat([data, forecasted])
@@ -33,15 +33,8 @@ def forecast_with_linear_regression(data, forecast_start_date):
     forecasted_data = pd.DataFrame(index=pd.date_range(start=forecast_start_date, periods=forecast_periods, freq='15T'))
     forecasted_data['wl_up'] = np.nan
 
-    # ใช้ข้อมูลย้อนหลัง 7 วันในการเทรนโมเดล
-    training_data_end = forecast_start_date - pd.Timedelta(minutes=15)
-    training_data_start = training_data_end - pd.Timedelta(days=7) + pd.Timedelta(minutes=15)
-
-    # ปรับช่วงข้อมูลหากมีข้อมูลไม่เพียงพอ
-    if training_data_start < data.index.min():
-        training_data_start = data.index.min()
-
-    training_data = data.loc[training_data_start:training_data_end].copy()
+    # ใช้ข้อมูลทั้งหมดในการเทรนโมเดล
+    training_data = data.copy()
 
     # เติมค่า missing values ด้วยการ interpolate
     training_data['wl_up'].interpolate(method='time', inplace=True)
@@ -51,8 +44,8 @@ def forecast_with_linear_regression(data, forecast_start_date):
     for lag in lags:
         training_data[f'lag_{lag}'] = training_data['wl_up'].shift(lag)
 
-    # ลบแถวที่มีค่า NaN ในฟีเจอร์
-    training_data.dropna(inplace=True)
+    # ลบแถวที่มีค่า NaN ในฟีเจอร์ lag
+    training_data.dropna(subset=[f'lag_{lag}' for lag in lags], inplace=True)
 
     # ตรวจสอบว่ามีข้อมูลเพียงพอหรือไม่
     if training_data.empty:
@@ -136,13 +129,13 @@ if uploaded_file is not None:
             # กำหนดวันที่เริ่มพยากรณ์เป็นเวลาถัดไปจากข้อมูลที่เลือก
             forecast_start_date = selected_data.index.max() + pd.Timedelta(minutes=15)
 
-            # พยากรณ์ 1 วันถัดไปจากช่วงวันที่เลือก
-            forecasted_data = forecast_with_linear_regression(selected_data, forecast_start_date)
+            # พยากรณ์ 1 วันถัดไปจากวันที่สิ้นสุดที่เลือก
+            forecasted_data = forecast_with_linear_regression(data, forecast_start_date)
 
             # ตรวจสอบว่ามีการพยากรณ์หรือไม่
             if not forecasted_data.empty:
-                # แสดงกราฟข้อมูลช่วงเวลาที่เลือกและกราฟการพยากรณ์
-                st.plotly_chart(plot_selected_and_forecasted(selected_data, forecasted_data))
+                # แสดงกราฟข้อมูลและการพยากรณ์
+                st.plotly_chart(plot_selected_and_forecasted(data, forecasted_data))
 
                 # ตรวจสอบว่ามีข้อมูลจริงสำหรับช่วงเวลาที่พยากรณ์หรือไม่
                 common_indices = forecasted_data.index.intersection(data.index)
