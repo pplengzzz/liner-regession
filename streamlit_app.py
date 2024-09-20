@@ -2,7 +2,8 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-from sklearn.linear_model import Ridge
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import PolynomialFeatures
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 # ตั้งค่าหน้าเว็บ Streamlit
@@ -30,8 +31,8 @@ def plot_selected_and_forecasted(data, forecasted, start_date, end_date):
     fig.update_layout(xaxis_title="Date", yaxis_title="Water Level (wl_up)")
     return fig
 
-# ฟังก์ชันสำหรับการพยากรณ์ด้วย Ridge Regression ที่แก้ไขแล้ว
-def forecast_with_regression(data, forecast_start_date):
+# ฟังก์ชันสำหรับการพยากรณ์ด้วย Linear Regression ที่ปรับปรุงแล้ว
+def forecast_with_linear_regression(data, forecast_start_date):
     # สร้าง DataFrame สำหรับการพยากรณ์ 1 วันถัดไป (96 ช่วงเวลา ทุกๆ 15 นาที)
     forecasted_data = pd.DataFrame(index=pd.date_range(start=forecast_start_date, periods=96, freq='15T'))
     forecasted_data['wl_up'] = np.nan
@@ -49,12 +50,8 @@ def forecast_with_regression(data, forecast_start_date):
     # เติมค่า missing values ด้วยการ interpolate
     training_data['wl_up'].interpolate(method='time', inplace=True)
 
-    # สร้างฟีเจอร์เพิ่มเติม เช่น Moving Average และ Trend
-    training_data['ma_96'] = training_data['wl_up'].rolling(window=96).mean()  # ค่าเฉลี่ยเคลื่อนที่ 1 วัน
-    training_data['trend'] = np.arange(len(training_data))  # เทรนด์เชิงเส้น
-
     # สร้างฟีเจอร์ lag หลายระดับ
-    lags = [1, 4, 96, 192, 288, 384, 480, 576]  # ใช้ข้อมูลย้อนหลังถึง 6 วัน
+    lags = list(range(1, 97))  # ใช้ lag ตั้งแต่ 1 ถึง 96 (ย้อนหลัง 1 วัน)
     for lag in lags:
         training_data[f'lag_{lag}'] = training_data['wl_up'].shift(lag)
 
@@ -64,21 +61,25 @@ def forecast_with_regression(data, forecast_start_date):
     # รวมฟีเจอร์เวลา
     training_data['hour'] = training_data.index.hour
     training_data['minute'] = training_data.index.minute
-    training_data['dayofweek'] = training_data.index.dayofweek  # แก้ไขจาก day_of_week เป็น dayofweek
+    training_data['dayofweek'] = training_data.index.dayofweek
 
     # ฟีเจอร์และตัวแปรเป้าหมาย
-    feature_cols = [f'lag_{lag}' for lag in lags] + ['ma_96', 'trend', 'hour', 'minute', 'dayofweek']
+    feature_cols = [f'lag_{lag}' for lag in lags] + ['hour', 'minute', 'dayofweek']
     X_train = training_data[feature_cols]
     y_train = training_data['wl_up']
 
+    # สร้างฟีเจอร์โพลิโนเมียล
+    poly = PolynomialFeatures(degree=2, include_bias=False)
+    X_train_poly = poly.fit_transform(X_train)
+
     # ตรวจสอบว่ามีข้อมูลเพียงพอหรือไม่
-    if X_train.empty:
+    if X_train_poly.size == 0:
         st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลสำหรับการเทรนไม่เพียงพอ")
         return pd.DataFrame()
 
-    # เทรนโมเดล Ridge Regression
-    model = Ridge(alpha=1.0)
-    model.fit(X_train, y_train)
+    # เทรนโมเดล Linear Regression
+    model = LinearRegression()
+    model.fit(X_train_poly, y_train)
 
     # การพยากรณ์
     for i in range(len(forecasted_data)):
@@ -100,37 +101,16 @@ def forecast_with_regression(data, forecast_start_date):
         if np.any(pd.isnull(list(lag_features.values()))):
             continue
 
-        # ฟีเจอร์เพิ่มเติม
-        # Moving Average
-        ma_time = forecast_time - pd.Timedelta(minutes=15)
-        ma_start_time = ma_time - pd.Timedelta(minutes=15*95)
-        if ma_start_time >= data.index.min():
-            ma_96 = data.loc[ma_start_time: ma_time]['wl_up'].mean()
-        else:
-            # ใช้ค่าที่พยากรณ์ไว้ก่อนหน้านี้
-            recent_values = forecasted_data['wl_up'].dropna()
-            if len(recent_values) >= 96:
-                ma_96 = recent_values.iloc[-96:].mean()
-            else:
-                ma_96 = np.nan
-        lag_features['ma_96'] = ma_96
-
-        # ถ้ามีค่า ma_96 ที่หายไป ให้ข้ามการพยากรณ์
-        if np.isnan(ma_96):
-            continue
-
-        # Trend
-        lag_features['trend'] = len(training_data) + i  # ต่อเนื่องจากข้อมูลเทรน
-
         # ฟีเจอร์เวลา
         lag_features['hour'] = forecast_time.hour
         lag_features['minute'] = forecast_time.minute
-        lag_features['dayofweek'] = forecast_time.dayofweek  # แก้ไขจาก day_of_week เป็น dayofweek
+        lag_features['dayofweek'] = forecast_time.dayofweek
 
         X_pred = pd.DataFrame([lag_features])
+        X_pred_poly = poly.transform(X_pred)
 
         # พยากรณ์ค่า
-        forecasted_value = model.predict(X_pred)[0]
+        forecasted_value = model.predict(X_pred_poly)[0]
         forecasted_data.at[forecast_time, 'wl_up'] = forecasted_value
 
     return forecasted_data
@@ -168,7 +148,7 @@ if uploaded_file is not None:
             forecast_start_date = pd.to_datetime(end_date) + pd.Timedelta(days=1)
 
             # พยากรณ์ 1 วันถัดไปจากวันที่ที่เลือก
-            forecasted_data = forecast_with_regression(filtered_data, forecast_start_date)
+            forecasted_data = forecast_with_linear_regression(filtered_data, forecast_start_date)
 
             # ตรวจสอบว่ามีการพยากรณ์หรือไม่
             if not forecasted_data.empty:
