@@ -9,47 +9,44 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 st.set_page_config(page_title='การพยากรณ์ด้วย Linear Regression', page_icon=':ocean:')
 
 # ชื่อของแอป
-st.title("การจัดการค่าระดับน้ำและการพยากรณ์ด้วย Linear Regression")
+st.title("การพยากรณ์ระดับน้ำด้วย Linear Regression")
 
-# ฟังก์ชันสำหรับการแสดงกราฟข้อมูลหลังลบค่า
-def plot_filtered_data(data):
-    fig = px.line(data, x=data.index, y='wl_up', title='Water Level Over Time (Filtered Data)', labels={'x': 'Date', 'wl_up': 'Water Level (wl_up)'})
-    fig.update_layout(xaxis_title="Date", yaxis_title="Water Level (wl_up)")
-    return fig
-
-# ฟังก์ชันสำหรับการแสดงกราฟข้อมูลและการพยากรณ์
-def plot_selected_and_forecasted(data, forecasted):
-    # รวมข้อมูลจริงและค่าพยากรณ์
-    combined_data = pd.concat([data, forecasted])
-    # สร้างกราฟ
-    fig = px.line(combined_data, x=combined_data.index, y='wl_up', title='Water Level with Forecast', labels={'x': 'Date', 'wl_up': 'Water Level (wl_up)'})
+# ฟังก์ชันสำหรับการแสดงกราฟข้อมูล
+def plot_data(data, forecasted=None):
+    fig = px.line(data, x=data.index, y='wl_up', title='Water Level Over Time', labels={'x': 'Date', 'wl_up': 'Water Level (wl_up)'})
+    if forecasted is not None and not forecasted.empty:
+        fig.add_scatter(x=forecasted.index, y=forecasted['wl_up'], mode='lines', name='Forecasted', line=dict(color='red'))
     fig.update_layout(xaxis_title="Date", yaxis_title="Water Level (wl_up)")
     return fig
 
 # ฟังก์ชันสำหรับการพยากรณ์ด้วย Linear Regression ที่ปรับปรุงแล้ว
 def forecast_with_linear_regression(data, forecast_start_date):
-    # สร้าง DataFrame สำหรับการพยากรณ์ 1 วันถัดไป (96 ช่วงเวลา ทุกๆ 15 นาที)
-    forecast_periods = 96
-    forecasted_data = pd.DataFrame(index=pd.date_range(start=forecast_start_date, periods=forecast_periods, freq='15T'))
-    forecasted_data['wl_up'] = np.nan
-
-    # ใช้ข้อมูลทั้งหมดในการเทรนโมเดล
-    training_data = data.copy()
-
     # เติมค่า missing values ด้วยการ interpolate
-    training_data['wl_up'].interpolate(method='time', inplace=True)
+    data['wl_up'].interpolate(method='time', inplace=True)
 
-    # สร้างฟีเจอร์ lag หลายระดับ
-    lags = [1, 4, 96, 672]  # ใช้ lag 15 นาที, 1 ชั่วโมง, 1 วัน, และ 7 วัน
+    # ใช้ข้อมูลย้อนหลังสำหรับการเทรน
+    training_data_end = forecast_start_date - pd.Timedelta(minutes=15)
+    training_data_start = data.index.min()
+
+    # ตรวจสอบว่ามีข้อมูลเพียงพอสำหรับการสร้าง lag features หรือไม่
+    required_lag = 96  # สมมติว่าใช้ lag มากที่สุดคือ 96 (1 วัน)
+    if (training_data_end - training_data_start) < pd.Timedelta(minutes=15 * required_lag):
+        st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลสำหรับการเทรนไม่เพียงพอ")
+        return pd.DataFrame()
+
+    training_data = data.loc[training_data_start:training_data_end].copy()
+
+    # สร้างฟีเจอร์ lag
+    lags = [1, 4, 96]  # ใช้ lag 15 นาที, 1 ชั่วโมง, 1 วัน
     for lag in lags:
         training_data[f'lag_{lag}'] = training_data['wl_up'].shift(lag)
 
     # ลบแถวที่มีค่า NaN ในฟีเจอร์ lag
-    training_data.dropna(subset=[f'lag_{lag}' for lag in lags], inplace=True)
+    training_data.dropna(inplace=True)
 
-    # ตรวจสอบว่ามีข้อมูลเพียงพอหรือไม่
+    # ตรวจสอบว่ามีข้อมูลเพียงพอหรือไม่หลังจากสร้างฟีเจอร์ lag
     if training_data.empty:
-        st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลสำหรับการเทรนไม่เพียงพอ")
+        st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลสำหรับการเทรนไม่เพียงพอหลังจากสร้างฟีเจอร์ lag")
         return pd.DataFrame()
 
     # ฟีเจอร์และตัวแปรเป้าหมาย
@@ -61,17 +58,24 @@ def forecast_with_linear_regression(data, forecast_start_date):
     model = LinearRegression()
     model.fit(X_train, y_train)
 
+    # สร้าง DataFrame สำหรับการพยากรณ์
+    forecast_periods = 96  # พยากรณ์ 1 วัน (96 ช่วงเวลา 15 นาที)
+    forecast_index = pd.date_range(start=forecast_start_date, periods=forecast_periods, freq='15T')
+    forecasted_data = pd.DataFrame(index=forecast_index)
+    forecasted_data['wl_up'] = np.nan
+
     # การพยากรณ์
     for idx in forecasted_data.index:
         lag_features = {}
         for lag in lags:
             lag_time = idx - pd.Timedelta(minutes=15 * lag)
             if lag_time in data.index:
-                lag_features[f'lag_{lag}'] = data.at[lag_time, 'wl_up']
-            elif lag_time in forecasted_data.index:
-                lag_features[f'lag_{lag}'] = forecasted_data.at[lag_time, 'wl_up']
+                lag_value = data.at[lag_time, 'wl_up']
+            elif lag_time in forecasted_data.index and not pd.isnull(forecasted_data.at[lag_time, 'wl_up']):
+                lag_value = forecasted_data.at[lag_time, 'wl_up']
             else:
-                lag_features[f'lag_{lag}'] = np.nan
+                lag_value = np.nan
+            lag_features[f'lag_{lag}'] = lag_value
 
         # ถ้ามีค่า lag ที่หายไป ให้ข้ามการพยากรณ์
         if np.any(pd.isnull(list(lag_features.values()))):
@@ -83,14 +87,8 @@ def forecast_with_linear_regression(data, forecast_start_date):
         forecast_value = model.predict(X_pred)[0]
         forecasted_data.at[idx, 'wl_up'] = forecast_value
 
-    # ทำให้ค่าพยากรณ์ต่อเนื่องจากค่าจริง
-    last_actual_value = data['wl_up'].iloc[-1]
-    first_forecast_value = forecasted_data['wl_up'].iloc[0]
-    value_diff = last_actual_value - first_forecast_value
-    forecasted_data['wl_up'] += value_diff
-
-    # ใช้ moving average เพื่อทำให้ค่าพยากรณ์เรียบขึ้น
-    forecasted_data['wl_up'] = forecasted_data['wl_up'].rolling(window=4, min_periods=1).mean()
+    # ลบแถวที่ไม่มีการพยากรณ์
+    forecasted_data.dropna(inplace=True)
 
     return forecasted_data
 
@@ -110,15 +108,15 @@ if uploaded_file is not None:
     data['wl_up'].interpolate(method='time', inplace=True)
 
     # แสดงกราฟข้อมูลหลังจากลบค่าที่น้อยกว่า 100 ออก
-    st.subheader('กราฟข้อมูลหลังจากลบค่าที่น้อยกว่า 100 ออก')
-    st.plotly_chart(plot_filtered_data(data))
+    st.subheader('กราฟข้อมูลระดับน้ำ')
+    st.plotly_chart(plot_data(data))
 
-    # ให้ผู้ใช้เลือกช่วงวันที่ที่สนใจและพยากรณ์ต่อจากข้อมูลที่เลือก
-    st.subheader("เลือกช่วงวันที่ที่สนใจและแสดงการพยากรณ์ต่อ")
-    start_date = st.date_input("เลือกวันเริ่มต้น (ดูข้อมูล)", pd.to_datetime(data.index.min()).date())
-    end_date = st.date_input("เลือกวันสิ้นสุด (ดูข้อมูล)", pd.to_datetime(data.index.max()).date())
+    # ให้ผู้ใช้เลือกช่วงวันที่ที่สนใจ
+    st.subheader("เลือกช่วงวันที่ที่สนใจ")
+    start_date = st.date_input("เลือกวันเริ่มต้น", pd.to_datetime(data.index.min()).date())
+    end_date = st.date_input("เลือกวันสิ้นสุด", pd.to_datetime(data.index.max()).date())
 
-    if st.button("ตกลง (พยากรณ์ต่อจากช่วงที่เลือก)"):
+    if st.button("พยากรณ์"):
         # เลือกข้อมูลช่วงวันที่ที่สนใจ
         selected_data = data[(data.index.date >= start_date) & (data.index.date <= end_date)]
 
@@ -129,13 +127,14 @@ if uploaded_file is not None:
             # กำหนดวันที่เริ่มพยากรณ์เป็นเวลาถัดไปจากข้อมูลที่เลือก
             forecast_start_date = selected_data.index.max() + pd.Timedelta(minutes=15)
 
-            # พยากรณ์ 1 วันถัดไปจากวันที่สิ้นสุดที่เลือก
+            # พยากรณ์
             forecasted_data = forecast_with_linear_regression(data, forecast_start_date)
 
             # ตรวจสอบว่ามีการพยากรณ์หรือไม่
             if not forecasted_data.empty:
-                # แสดงกราฟข้อมูลและการพยากรณ์
-                st.plotly_chart(plot_selected_and_forecasted(data, forecasted_data))
+                # แสดงกราฟข้อมูลพร้อมการพยากรณ์
+                st.subheader('กราฟข้อมูลพร้อมการพยากรณ์')
+                st.plotly_chart(plot_data(data, forecasted_data))
 
                 # ตรวจสอบว่ามีข้อมูลจริงสำหรับช่วงเวลาที่พยากรณ์หรือไม่
                 common_indices = forecasted_data.index.intersection(data.index)
