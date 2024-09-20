@@ -6,43 +6,37 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 # ตั้งค่าหน้าเว็บ Streamlit
-st.set_page_config(page_title='การพยากรณ์ระดับน้ำด้วย Linear Regression', page_icon=':ocean:')
+st.set_page_config(page_title='การพยากรณ์ด้วย Linear Regression', page_icon=':ocean:')
 
 # ชื่อของแอป
 st.title("การพยากรณ์ระดับน้ำด้วย Linear Regression")
 
 # ฟังก์ชันสำหรับการแสดงกราฟข้อมูล
 def plot_data(data, forecasted=None):
-    fig = px.line(data, x=data.index, y='wl_up', title='ระดับน้ำตามเวลา', labels={'x': 'วันที่', 'wl_up': 'ระดับน้ำ (wl_up)'})
+    fig = px.line(data, x=data.index, y='wl_up', title='Water Level Over Time', labels={'x': 'Date', 'wl_up': 'Water Level (wl_up)'})
     if forecasted is not None and not forecasted.empty:
-        fig.add_scatter(x=forecasted.index, y=forecasted['wl_up'], mode='lines', name='ค่าที่พยากรณ์', line=dict(color='red'))
-    fig.update_layout(xaxis_title="วันที่", yaxis_title="ระดับน้ำ (wl_up)")
+        fig.add_scatter(x=forecasted.index, y=forecasted['wl_up'], mode='lines', name='Forecasted', line=dict(color='red'))
+    fig.update_layout(xaxis_title="Date", yaxis_title="Water Level (wl_up)")
     return fig
 
-# ฟังก์ชันสำหรับการพยากรณ์ด้วย Linear Regression
+# ฟังก์ชันสำหรับการพยากรณ์ด้วย Linear Regression ที่ปรับปรุงแล้ว
 def forecast_with_linear_regression(data, forecast_start_date):
     # เติมค่า missing values ด้วยการ interpolate
     data['wl_up'].interpolate(method='time', inplace=True)
 
-    # ใช้ข้อมูลย้อนหลัง 1 วันในการเทรนโมเดล
-    max_lag = 96  # 96 ช่วงเวลา = 1 วัน (15 นาที * 96)
+    # ใช้ข้อมูลย้อนหลัง 3 วันในการเทรนโมเดล
     training_data_end = forecast_start_date - pd.Timedelta(minutes=15)
-    training_data_start = training_data_end - pd.Timedelta(minutes=15 * max_lag)
-
-    # ปรับ training_data_start ให้ไม่เกินช่วงข้อมูลที่มี
-    if training_data_start < data.index.min():
-        training_data_start = data.index.min()
-
-    # สร้าง training_data
-    training_data = data.loc[training_data_start:training_data_end].copy()
+    training_data_start = training_data_end - pd.Timedelta(days=3) + pd.Timedelta(minutes=15)
 
     # ตรวจสอบว่ามีข้อมูลเพียงพอหรือไม่
-    if len(training_data) < max_lag:
+    if training_data_start < data.index.min():
         st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลสำหรับการเทรนไม่เพียงพอ")
         return pd.DataFrame()
 
+    training_data = data.loc[training_data_start:training_data_end].copy()
+
     # สร้างฟีเจอร์ lag
-    lags = [1, 4, 12, 48, 96]  # ใช้ lag ที่เหมาะสมกับข้อมูล 1 วัน
+    lags = [1, 4, 96, 192]  # ใช้ lag 15 นาที, 1 ชั่วโมง, 1 วัน, 2 วัน
     for lag in lags:
         training_data[f'lag_{lag}'] = training_data['wl_up'].shift(lag)
 
