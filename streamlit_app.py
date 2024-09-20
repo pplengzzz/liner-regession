@@ -104,7 +104,7 @@ def forecast_with_regression(data, forecast_start_date):
         # Moving Average
         ma_time = forecast_time - pd.Timedelta(minutes=15)
         ma_start_time = ma_time - pd.Timedelta(minutes=15*95)
-        if ma_start_time in data.index and ma_time in data.index:
+        if ma_start_time >= data.index.min():
             ma_96 = data.loc[ma_start_time: ma_time]['wl_up'].mean()
         else:
             # ใช้ค่าที่พยากรณ์ไว้ก่อนหน้านี้
@@ -175,15 +175,18 @@ if uploaded_file is not None:
                 # แสดงกราฟข้อมูลช่วงเวลาที่เลือกและกราฟการพยากรณ์
                 st.plotly_chart(plot_selected_and_forecasted(filtered_data, forecasted_data, start_date, end_date))
 
-                # คำนวณค่าประเมินผล (ถ้ามีข้อมูลจริงในช่วงพยากรณ์)
-                actual_data = filtered_data.loc[forecasted_data.index]
-                if not actual_data.empty:
+                # ตรวจสอบว่ามีข้อมูลจริงสำหรับช่วงเวลาที่พยากรณ์หรือไม่
+                common_indices = forecasted_data.index.intersection(filtered_data.index)
+                if not common_indices.empty:
+                    actual_data = filtered_data.loc[common_indices]
                     y_true = actual_data['wl_up']
-                    y_pred = forecasted_data['wl_up'].loc[actual_data.index]
+                    y_pred = forecasted_data['wl_up'].loc[common_indices]
                     mae = mean_absolute_error(y_true, y_pred)
                     rmse = mean_squared_error(y_true, y_pred, squared=False)
                     st.write(f"Mean Absolute Error (MAE): {mae:.2f}")
                     st.write(f"Root Mean Squared Error (RMSE): {rmse:.2f}")
+                else:
+                    st.info("ไม่มีข้อมูลจริงสำหรับช่วงเวลาที่พยากรณ์ ไม่สามารถคำนวณค่า MAE และ RMSE ได้")
             else:
                 st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอ")
 
