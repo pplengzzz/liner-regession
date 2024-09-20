@@ -38,13 +38,25 @@ def forecast_with_regression(data, forecast_start_date):
     # ใช้ข้อมูลย้อนหลัง 7 วันในการเทรนโมเดล
     training_data_end = forecast_start_date - pd.Timedelta(minutes=15)
     training_data_start = training_data_end - pd.Timedelta(days=7) + pd.Timedelta(minutes=15)
+
+    # ปรับช่วงข้อมูลหากมีข้อมูลไม่เพียงพอ
+    if training_data_start < data.index.min():
+        training_data_start = data.index.min()
+
     training_data = data.loc[training_data_start:training_data_end].copy()
 
+    # เติมค่า missing values
+    training_data['wl_up'].interpolate(method='time', inplace=True)
+
     # สร้างฟีเจอร์ lag หลายระดับ
-    lags = [1, 4, 96, 192, 288, 384, 480, 576, 672]  # lag 15 นาที, 1 ชั่วโมง, และทุกๆ 1 วัน จนถึง 7 วัน
+    max_lag = int((training_data_end - training_data_start) / pd.Timedelta(minutes=15))
+    lags = [i for i in [1, 4, 96, 192, 288, 384, 480, 576, 672] if i <= max_lag]
+
     for lag in lags:
         training_data[f'lag_{lag}'] = training_data['wl_up'].shift(lag)
-    training_data.dropna(inplace=True)
+
+    # ลบแถวที่มีค่า NaN ใน lag features
+    training_data.dropna(subset=[f'lag_{lag}' for lag in lags], inplace=True)
 
     # รวมฟีเจอร์เวลา
     training_data['hour'] = training_data.index.hour
@@ -55,6 +67,11 @@ def forecast_with_regression(data, forecast_start_date):
     feature_cols = [f'lag_{lag}' for lag in lags] + ['hour', 'minute', 'day_of_week']
     X_train = training_data[feature_cols]
     y_train = training_data['wl_up']
+
+    # ตรวจสอบว่ามีข้อมูลเพียงพอหรือไม่
+    if X_train.empty:
+        st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลสำหรับการเทรนไม่เพียงพอ")
+        return pd.DataFrame()
 
     # เทรนโมเดล
     model = LinearRegression()
@@ -67,18 +84,17 @@ def forecast_with_regression(data, forecast_start_date):
         # สร้างฟีเจอร์ lag
         lag_features = {}
         for lag in lags:
-            lag_time = forecast_time - pd.Timedelta(minutes=15*lag)
+            lag_time = forecast_time - pd.Timedelta(minutes=15 * lag)
             if lag_time in data.index:
                 lag_value = data.at[lag_time, 'wl_up']
             elif lag_time in forecasted_data.index:
-                lag_index = forecasted_data.index.get_loc(lag_time)
-                lag_value = forecasted_data.iloc[lag_index]['wl_up']
+                lag_value = forecasted_data.at[lag_time, 'wl_up']
             else:
                 lag_value = np.nan
             lag_features[f'lag_{lag}'] = lag_value
 
         # ถ้ามีค่า lag ที่หายไป ให้ข้ามการพยากรณ์
-        if np.any([np.isnan(v) for v in lag_features.values()]):
+        if np.any(pd.isnull(list(lag_features.values()))):
             continue
 
         # ฟีเจอร์เวลา
@@ -90,7 +106,7 @@ def forecast_with_regression(data, forecast_start_date):
 
         # พยากรณ์ค่า
         forecasted_value = model.predict(X_pred)[0]
-        forecasted_data.iloc[i, forecasted_data.columns.get_loc('wl_up')] = forecasted_value
+        forecasted_data.at[forecast_time, 'wl_up'] = forecasted_value
 
     return forecasted_data
 
@@ -122,7 +138,11 @@ if uploaded_file is not None:
         # พยากรณ์ 1 วันถัดไปจากช่วงวันที่เลือก
         forecasted_data = forecast_with_regression(filtered_data, forecast_start_date)
 
-        # แสดงกราฟข้อมูลช่วงเวลาที่เลือกและกราฟการพยากรณ์
-        st.plotly_chart(plot_selected_and_forecasted(filtered_data, forecasted_data, start_date, end_date))
+        # ตรวจสอบว่ามีการพยากรณ์หรือไม่
+        if not forecasted_data.empty:
+            # แสดงกราฟข้อมูลช่วงเวลาที่เลือกและกราฟการพยากรณ์
+            st.plotly_chart(plot_selected_and_forecasted(filtered_data, forecasted_data, start_date, end_date))
+        else:
+            st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอ")
 
 
