@@ -25,9 +25,6 @@ def plot_data(data, forecasted=None):
 # ฟังก์ชันสำหรับการพยากรณ์ด้วย Linear Regression
 # --------------------------------------------
 def forecast_with_linear_regression(data, forecast_start_date):
-    # เติมค่า missing values ด้วยการ interpolate
-    data['wl_up'].interpolate(method='time', inplace=True)
-
     # ใช้ข้อมูลย้อนหลัง 3 วันในการเทรนโมเดล
     training_data_end = forecast_start_date - pd.Timedelta(minutes=15)
     training_data_start = training_data_end - pd.Timedelta(days=3) + pd.Timedelta(minutes=15)
@@ -73,11 +70,9 @@ def forecast_with_linear_regression(data, forecast_start_date):
         lag_features = {}
         for lag in lags:
             lag_time = idx - pd.Timedelta(minutes=15 * lag)
-            # ดึงค่าจากข้อมูลจริงหรือค่าที่พยากรณ์ไว้ก่อนหน้า
+            # ดึงค่าจากข้อมูลจริงเท่านั้น
             if lag_time in data.index:
                 lag_value = data.at[lag_time, 'wl_up']
-            elif lag_time in forecasted_data.index and not pd.isnull(forecasted_data.at[lag_time, 'wl_up']):
-                lag_value = forecasted_data.at[lag_time, 'wl_up']
             else:
                 lag_value = np.nan
             lag_features[f'lag_{lag}'] = lag_value
@@ -114,9 +109,6 @@ if uploaded_file is not None:
 
     # ตัดข้อมูลที่มีค่า wl_up น้อยกว่า 100 ออก
     data = data[data['wl_up'] >= 100]
-
-    # เติมค่า missing values ใน wl_up
-    data['wl_up'].interpolate(method='time', inplace=True)
 
     # แสดงกราฟข้อมูล
     st.subheader('กราฟข้อมูลระดับน้ำ')
