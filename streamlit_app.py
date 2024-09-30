@@ -123,7 +123,7 @@ if uploaded_file is not None:
     st.plotly_chart(plot_data(data))
 
     # ให้ผู้ใช้เลือกช่วงวันที่ที่สนใจ
-    st.subheader("เลือกช่วงวันที่ที่สนใจ")
+    st.subheader("เลือกช่วงวันที่ต้องการพยากาณ์ในอีก 1 วันข้างหน้า")
     start_date = st.date_input("เลือกวันเริ่มต้น", data.index.min().date())
     end_date = st.date_input("เลือกวันสิ้นสุด", data.index.max().date())
 
