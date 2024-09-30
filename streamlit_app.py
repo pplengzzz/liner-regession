@@ -14,10 +14,12 @@ st.title("การพยากรณ์ระดับน้ำด้วย Lin
 # -------------------------------
 # ฟังก์ชันสำหรับการแสดงกราฟข้อมูล
 # -------------------------------
-def plot_data(data, forecasted=None):
+def plot_data(data, cut_data=None, forecasted=None):
     fig = px.line(data, x=data.index, y='wl_up', title='ระดับน้ำตามเวลา', labels={'x': 'วันที่', 'wl_up': 'ระดับน้ำ (wl_up)'})
+    if cut_data is not None and not cut_data.empty:
+        fig.add_scatter(x=cut_data.index, y=cut_data['wl_up'], mode='lines', name='ค่าที่ถูกตัด', line=dict(color='orange'))
     if forecasted is not None and not forecasted.empty:
-        fig.add_scatter(x=forecasted.index, y=forecasted['wl_up'], mode='lines', name='ค่าที่พยากรณ์', line=dict(color='red'))
+        fig.add_scatter(x=forecasted.index, y=forecasted['wl_up'], mode='lines', name='ค่าที่เติมด้วยโมเดล', line=dict(color='green'))
     fig.update_layout(xaxis_title="วันที่", yaxis_title="ระดับน้ำ (wl_up)")
     return fig
 
@@ -146,9 +148,22 @@ if uploaded_file is not None:
 
                 # ตรวจสอบว่ามีการพยากรณ์หรือไม่
                 if not forecasted_data.empty:
-                    # แสดงกราฟข้อมูลพร้อมการพยากรณ์
-                    st.subheader('กราฟข้อมูลพร้อมการพยากรณ์')
-                    st.plotly_chart(plot_data(selected_data, forecasted_data))
+                    # สร้างข้อมูลที่ถูกตัดเพื่อนำมาเปรียบเทียบ
+                    cut_data = data.loc[forecasted_data.index].copy()
+                    cut_data['wl_up'] = np.nan
+
+                    # แสดงกราฟข้อมูลพร้อมการพยากรณ์และค่าที่ถูกตัด
+                    st.subheader('กราฟข้อมูลพร้อมการพยากรณ์และค่าที่ถูกตัด')
+                    st.plotly_chart(plot_data(selected_data, cut_data, forecasted_data))
+
+                    # แสดงตารางข้อมูลเฉพาะช่วงเวลาที่ใช้ทำนาย
+                    st.subheader('ตารางข้อมูลช่วงเวลาที่ใช้ทำนาย')
+                    comparison_table = pd.DataFrame({
+                        'datetime': forecasted_data.index,
+                        'ค่าระดับน้ำที่ถูกตัด': cut_data['wl_up'].values,
+                        'ค่าระดับน้ำที่เติมด้วยโมเดล': forecasted_data['wl_up'].values
+                    })
+                    st.dataframe(comparison_table)
 
                     # ตรวจสอบว่ามีข้อมูลจริงสำหรับช่วงเวลาที่พยากรณ์หรือไม่
                     common_indices = forecasted_data.index.intersection(data.index)
@@ -164,5 +179,6 @@ if uploaded_file is not None:
                         st.info("ไม่มีข้อมูลจริงสำหรับช่วงเวลาที่พยากรณ์ ไม่สามารถคำนวณค่า MAE และ RMSE ได้")
                 else:
                     st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอ")
+
 
 
