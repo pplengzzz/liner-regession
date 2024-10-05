@@ -15,8 +15,9 @@ st.title("การพยากรณ์ระดับน้ำด้วย Lin
 # ฟังก์ชันสำหรับการแสดงกราฟข้อมูล
 # -------------------------------
 def plot_data(data, forecasted=None, label='ระดับน้ำ'):
-    # ใช้ 'wl_up' ซึ่งเป็นคอลัมน์ระดับน้ำที่ถูกต้อง
+    # ใช้ 'wl_up' ซึ่งเป็นคอลัมน์ระดับน้ำที่ถูกต้อง และตั้งค่า connectgaps=False
     fig = px.line(data, x=data.index, y='wl_up', title=f'ระดับน้ำที่สถานี {label}', labels={'x': 'วันที่', 'wl_up': 'ระดับน้ำ (wl_up)'})
+    fig.update_traces(connectgaps=False)  # ไม่เชื่อมเส้นในกรณีที่ไม่มีข้อมูล
     if forecasted is not None and not forecasted.empty:
         fig.add_scatter(x=forecasted.index, y=forecasted['wl_up'], mode='lines', name='ค่าที่พยากรณ์', line=dict(color='red'))
     fig.update_layout(xaxis_title="วันที่", yaxis_title="ระดับน้ำ (wl_up)")
@@ -98,7 +99,7 @@ if uploaded_up_file is not None and uploaded_target_file is not None:
     up_data = pd.read_csv(uploaded_up_file)
     target_data = pd.read_csv(uploaded_target_file)
 
-    # แปลง column datetime เป็น datetime และตั้งให้เป็น index
+    # แปลง column datetime ให้เป็น datetime และตั้งให้เป็น index
     for data in [up_data, target_data]:
         data['datetime'] = pd.to_datetime(data['datetime'])
         data['datetime'] = data['datetime'].dt.tz_localize(None)
@@ -109,18 +110,23 @@ if uploaded_up_file is not None and uploaded_target_file is not None:
     st.plotly_chart(plot_data(up_data, label='สถานีข้างบน (up)'))
     st.plotly_chart(plot_data(target_data, label='สถานีที่ต้องการทำนาย'))
 
-    # ส่วนการพยากรณ์ใช้ target_data เพื่อเทรนและทำนาย
-    # ให้ผู้ใช้เลือกช่วงวันที่ที่สนใจ
+    # ให้ผู้ใช้เลือกช่วงวันที่และเวลา
     st.subheader("เลือกช่วงวันสำหรับพยากรณ์ในอีก 1 วันข้างหน้า")
     start_date = st.date_input("เลือกวันเริ่มต้น", target_data.index.min().date())
+    start_time = st.time_input("เลือกเวลาเริ่มต้น", target_data.index.min().time())
     end_date = st.date_input("เลือกวันสิ้นสุด", target_data.index.max().date())
+    end_time = st.time_input("เลือกเวลาสิ้นสุด", target_data.index.max().time())
 
-    if start_date > end_date:
-        st.error("วันเริ่มต้นต้องไม่เกินวันสิ้นสุด")
+    # รวมวันที่และเวลา
+    start_datetime = pd.Timestamp.combine(start_date, start_time)
+    end_datetime = pd.Timestamp.combine(end_date, end_time)
+
+    if start_datetime > end_datetime:
+        st.error("วันและเวลาที่เริ่มต้นต้องไม่เกินวันและเวลาสิ้นสุด")
     else:
         if st.button("พยากรณ์"):
-            # เลือกข้อมูลช่วงวันที่ที่สนใจ
-            selected_data = target_data[(target_data.index.date >= start_date) & (target_data.index.date <= end_date)].copy()
+            # เลือกข้อมูลช่วงวันที่และเวลาที่สนใจ
+            selected_data = target_data[(target_data.index >= start_datetime) & (target_data.index <= end_datetime)].copy()
 
             # ตรวจสอบว่ามีข้อมูลเพียงพอหรือไม่
             if selected_data.empty:
