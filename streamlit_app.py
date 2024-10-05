@@ -150,13 +150,19 @@ if uploaded_up_file is not None and uploaded_target_file is not None:
                         actual_data = target_data.loc[common_indices]
                         y_true = actual_data['wl_up']
                         y_pred = forecasted_data['wl_up'].loc[common_indices]
+
+                        # ทำให้ y_true และ y_pred มีขนาดเท่ากัน
+                        min_length = min(len(y_true), len(y_pred))
+                        y_true = y_true[:min_length]
+                        y_pred = y_pred[:min_length]
+
                         mae = mean_absolute_error(y_true, y_pred)
                         rmse = mean_squared_error(y_true, y_pred, squared=False)
 
                         # แสดงตารางที่มี datetime, ค่าจริง, ค่าพยากรณ์
                         st.subheader('ตารางข้อมูลเปรียบเทียบ')
                         comparison_table = pd.DataFrame({
-                            'datetime': forecasted_data.index,
+                            'datetime': forecasted_data.index[:min_length],
                             'ค่าจริง (ถ้ามี)': y_true.values,
                             'ค่าที่พยากรณ์': y_pred.values
                         })
@@ -169,5 +175,3 @@ if uploaded_up_file is not None and uploaded_target_file is not None:
                         st.info("ไม่มีข้อมูลจริงสำหรับช่วงเวลาที่พยากรณ์ ไม่สามารถคำนวณค่า MAE และ RMSE ได้")
                 else:
                     st.error("ไม่สามารถพยากรณ์ได้เนื่องจากข้อมูลไม่เพียงพอ")
-
-
