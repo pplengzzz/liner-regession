@@ -27,8 +27,8 @@ def plot_data(data, forecasted=None, label='ระดับน้ำ'):
 # ฟังก์ชันสำหรับการพยากรณ์ด้วย Linear Regression
 # --------------------------------------------
 def forecast_with_linear_regression(up_data, target_data, forecast_start_date):
-    # ใช้ข้อมูล 288 แถวสุดท้ายจาก up_data ในการเทรนโมเดล
-    training_data = up_data.iloc[-288:].copy()
+    # ใช้ข้อมูล 672 แถวสุดท้ายจาก up_data ในการเทรนโมเดล
+    training_data = up_data.iloc[-672:].copy()
 
     # สร้างฟีเจอร์ lag
     lags = [1, 4, 96, 192]  # lag 15 นาที, 1 ชั่วโมง, 1 วัน, 2 วัน
