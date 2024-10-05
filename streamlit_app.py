@@ -15,10 +15,11 @@ st.title("การพยากรณ์ระดับน้ำด้วย Lin
 # ฟังก์ชันสำหรับการแสดงกราฟข้อมูล
 # -------------------------------
 def plot_data(data, forecasted=None, label='ระดับน้ำ'):
-    fig = px.line(data, x=data.index, y='wl', title=f'ระดับน้ำที่สถานี {label}', labels={'x': 'วันที่', 'wl': 'ระดับน้ำ (wl)'})
+    # ใช้ 'wl_up' ซึ่งเป็นคอลัมน์ระดับน้ำที่ถูกต้อง
+    fig = px.line(data, x=data.index, y='wl_up', title=f'ระดับน้ำที่สถานี {label}', labels={'x': 'วันที่', 'wl_up': 'ระดับน้ำ (wl_up)'})
     if forecasted is not None and not forecasted.empty:
-        fig.add_scatter(x=forecasted.index, y=forecasted['wl'], mode='lines', name='ค่าที่พยากรณ์', line=dict(color='red'))
-    fig.update_layout(xaxis_title="วันที่", yaxis_title="ระดับน้ำ (wl)")
+        fig.add_scatter(x=forecasted.index, y=forecasted['wl_up'], mode='lines', name='ค่าที่พยากรณ์', line=dict(color='red'))
+    fig.update_layout(xaxis_title="วันที่", yaxis_title="ระดับน้ำ (wl_up)")
     return fig
 
 # --------------------------------------------
@@ -31,7 +32,7 @@ def forecast_with_linear_regression(up_data, target_data, forecast_start_date):
     # สร้างฟีเจอร์ lag
     lags = [1, 4, 96, 192]  # lag 15 นาที, 1 ชั่วโมง, 1 วัน, 2 วัน
     for lag in lags:
-        training_data[f'lag_{lag}'] = training_data['wl'].shift(lag)
+        training_data[f'lag_{lag}'] = training_data['wl_up'].shift(lag)
 
     # ลบแถวที่มีค่า NaN ในฟีเจอร์ lag
     training_data.dropna(inplace=True)
@@ -44,7 +45,7 @@ def forecast_with_linear_regression(up_data, target_data, forecast_start_date):
     # กำหนดฟีเจอร์และตัวแปรเป้าหมาย
     feature_cols = [f'lag_{lag}' for lag in lags]
     X_train = training_data[feature_cols]
-    y_train = training_data['wl']
+    y_train = training_data['wl_up']
 
     # เทรนโมเดล Linear Regression
     model = LinearRegression()
@@ -54,7 +55,7 @@ def forecast_with_linear_regression(up_data, target_data, forecast_start_date):
     forecast_periods = 96  # พยากรณ์ 1 วัน (96 ช่วงเวลา 15 นาที)
     forecast_index = pd.date_range(start=forecast_start_date, periods=forecast_periods, freq='15T')
     forecasted_data = pd.DataFrame(index=forecast_index)
-    forecasted_data['wl'] = np.nan
+    forecasted_data['wl_up'] = np.nan
 
     # การพยากรณ์
     for idx in forecasted_data.index:
@@ -63,7 +64,7 @@ def forecast_with_linear_regression(up_data, target_data, forecast_start_date):
             lag_time = idx - pd.Timedelta(minutes=15 * lag)
             # ดึงค่าจากข้อมูลจริงเท่านั้น
             if lag_time in up_data.index:
-                lag_value = up_data.at[lag_time, 'wl']
+                lag_value = up_data.at[lag_time, 'wl_up']
             else:
                 lag_value = np.nan
             lag_features[f'lag_{lag}'] = lag_value
@@ -77,7 +78,7 @@ def forecast_with_linear_regression(up_data, target_data, forecast_start_date):
 
         # พยากรณ์ค่า
         forecast_value = model.predict(X_pred)[0]
-        forecasted_data.at[idx, 'wl'] = forecast_value
+        forecasted_data.at[idx, 'wl_up'] = forecast_value
 
     # ลบแถวที่ไม่มีการพยากรณ์
     forecasted_data.dropna(inplace=True)
@@ -141,8 +142,8 @@ if uploaded_up_file is not None and uploaded_target_file is not None:
                     common_indices = forecasted_data.index.intersection(target_data.index)
                     if not common_indices.empty:
                         actual_data = target_data.loc[common_indices]
-                        y_true = actual_data['wl']
-                        y_pred = forecasted_data['wl'].loc[common_indices]
+                        y_true = actual_data['wl_up']
+                        y_pred = forecasted_data['wl_up'].loc[common_indices]
                         mae = mean_absolute_error(y_true, y_pred)
                         rmse = mean_squared_error(y_true, y_pred, squared=False)
 
